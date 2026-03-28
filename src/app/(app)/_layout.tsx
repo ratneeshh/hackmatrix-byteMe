@@ -1,6 +1,14 @@
+// import { useEffect } from 'react';
+// import { Tabs } from 'expo-router';
+// import { View, Text } from 'react-native';
+// import { useAuthStore } from '../../store/authStore';
+// import { supabase } from '../../api/supabase';
+// import { useRouter } from 'expo-router';
+// import { Home, Clock, BarChart2, Settings } from 'lucide-react-native';
+
 import { useEffect } from 'react';
 import { Tabs } from 'expo-router';
-import { View, Text } from 'react-native';
+import { Text } from 'react-native';
 import { useAuthStore } from '../../store/authStore';
 import { supabase } from '../../api/supabase';
 import { useRouter } from 'expo-router';
@@ -53,8 +61,8 @@ export default function AppLayout() {
         options={{
           title: 'Home',
           tabBarIcon: ({ color, size }) => (
-            <Home color={color} size={size} />
-          ),
+            <Home stroke={color} width={size} height={size} />
+            ),
         }}
       />
       <Tabs.Screen
@@ -62,8 +70,8 @@ export default function AppLayout() {
         options={{
           title: 'History',
           tabBarIcon: ({ color, size }) => (
-            <Clock color={color} size={size} />
-          ),
+            <Home stroke={color} width={size} height={size} />
+            ),
         }}
       />
       <Tabs.Screen
@@ -71,8 +79,8 @@ export default function AppLayout() {
         options={{
           title: 'Analytics',
           tabBarIcon: ({ color, size }) => (
-            <BarChart2 color={color} size={size} />
-          ),
+            <BarChart2 stroke={color} width={size} height={size} />
+            ),
         }}
       />
       <Tabs.Screen
@@ -80,8 +88,8 @@ export default function AppLayout() {
         options={{
           title: 'Settings',
           tabBarIcon: ({ color, size }) => (
-            <Settings color={color} size={size} />
-          ),
+        <Settings stroke={color} width={size} height={size} />
+        ),
         }}
       />
       {/* Hidden screens - not shown in tab bar */}
