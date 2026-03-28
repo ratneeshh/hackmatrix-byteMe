@@ -21,6 +21,7 @@
     "expo-sqlite": "55.0.12-canary-20260327-0789fbc",
     "expo-status-bar": "55.0.5-canary-20260327-0789fbc",
     "lottie-react-native": "^7.3.6",
+    "lucide-react-native": "^1.7.0",
     "nativewind": "^4.2.3",
     "react": "19.2.0",
     "react-native": "0.83.4",

@@ -1,36 +1,57 @@
 {
   "expo": {
-    "name": "mediscribe",
+    "name": "MediScribe",
     "slug": "mediscribe",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#0a0f1e"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "bundleIdentifier": "com.mediscribe.app",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "MediScribe needs microphone access to capture doctor-patient consultations.",
+        "NSSpeechRecognitionUsageDescription": "MediScribe uses speech recognition for clinical transcription."
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0a0f1e"
       },
-      "predictiveBackGestureEnabled": false
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ],
+      "package": "com.mediscribe.app"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-sqlite",
-      "expo-secure-store",
       "expo-router",
-      "expo-font"
-    ]
+      "expo-secure-store",
+      [
+        "expo-av",
+        {
+          "microphonePermission": "MediScribe needs microphone access to capture consultations."
+        }
+      ],
+      [
+        "expo-sqlite",
+        {
+          "enableFTS": true
+        }
+      ]
+    ],
+    "scheme": "mediscribe",
+    "experiments": {
+      "typedRoutes": true
+    }
   }
 }
