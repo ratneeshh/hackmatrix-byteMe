@@ -1,22 +1,25 @@
 import { create } from 'zustand';
-import { Doctor } from '../../shared/types/db';
+import type { Doctor } from '../../shared/types/db';
 
-type AuthState = {
-  doctor: Doctor | null;
-  isAuthenticated: boolean;
-  isLoading: boolean;
-  setDoctor: (doctor: Doctor | null) => void;
-  setAuthenticated: (val: boolean) => void;
-  setLoading: (val: boolean) => void;
-  logout: () => void;
-};
+interface AuthState {
+  doctor:       Doctor | null;
+  accessToken:  string | null;
+  isLoading:    boolean;
+
+  setDoctor:     (doctor: Doctor | null) => void;
+  setToken:      (token: string | null) => void;
+  setLoading:    (loading: boolean) => void;
+  clearAuth:     () => void;
+}
 
 export const useAuthStore = create<AuthState>((set) => ({
-  doctor: null,
-  isAuthenticated: false,
-  isLoading: true,
-  setDoctor: (doctor) => set({ doctor }),
-  setAuthenticated: (val) => set({ isAuthenticated: val }),
-  setLoading: (val) => set({ isLoading: val }),
-  logout: () => set({ doctor: null, isAuthenticated: false }),
+  doctor:      null,
+  accessToken: null,
+  isLoading:   true,
+
+  setDoctor:  (doctor)  => set({ doctor }),
+  setToken:   (token)   => set({ accessToken: token }),
+  setLoading: (loading) => set({ isLoading: loading }),
+
+  clearAuth: () => set({ doctor: null, accessToken: null }),
 }));

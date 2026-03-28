@@ -1,65 +1,84 @@
-/**
- * patient.queries.ts
- * TanStack Query hooks for patient search and creation.
- */
-
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
 import type { Patient } from '../../shared/types/db';
-import { useAuthStore } from '../store/authStore';
 
+// ── Query keys ───────────────────────────────────────────────────────────────
 export const patientKeys = {
   all:    ['patients'] as const,
-  search: (term: string) => [...patientKeys.all, 'search', term] as const,
-  detail: (id: string)   => [...patientKeys.all, 'detail', id] as const,
+  search: (q: string) => ['patients', 'search', q] as const,
+  detail: (id: string) => ['patients', id] as const,
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// usePatientSearch — debounced search used in PatientSearch component
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Search patients (debounced in PatientSearch.tsx) ─────────────────────────
+export function useSearchPatients(query: string) {
+  return useQuery({
+    queryKey: patientKeys.search(query),
+    queryFn: async (): Promise<Patient[]> => {
+      if (!query.trim()) return [];
 
-export const usePatientSearch = (term: string) =>
-  useQuery<Patient[]>({
-    queryKey: patientKeys.search(term),
-    queryFn: async () => {
       const { data, error } = await supabase
         .from('patients')
         .select('*')
-        .ilike('name', `%${term}%`)
-        .order('created_at', { ascending: false })
+        .ilike('name', `%${query}%`)
+        .order('name', { ascending: true })
         .limit(10);
+
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as Patient[];
     },
-    enabled: term.length >= 2,
-    staleTime: 1000 * 10,
+    enabled: query.length >= 2,
+    staleTime: 1000 * 30, // 30 seconds
   });
+}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// useCreatePatient — mutation to create a new patient record
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Get a single patient ─────────────────────────────────────────────────────
+export function usePatient(patientId: string | null) {
+  return useQuery({
+    queryKey: patientKeys.detail(patientId ?? ''),
+    queryFn: async (): Promise<Patient | null> => {
+      if (!patientId) return null;
 
-export const useCreatePatient = () => {
-  const qc = useQueryClient();
-  const { doctor } = useAuthStore();
-
-  return useMutation<
-    Patient,
-    Error,
-    { name: string; age: number; gender: 'MALE' | 'FEMALE' | 'OTHER'; mobile?: string; abha_id?: string }
-  >({
-    mutationFn: async (payload) => {
       const { data, error } = await supabase
         .from('patients')
-        .insert({ doctor_id: doctor!.id, ...payload })
+        .select('*')
+        .eq('id', patientId)
+        .single();
+
+      if (error) throw error;
+      return data as Patient;
+    },
+    enabled: !!patientId,
+    staleTime: 1000 * 60 * 5,
+  });
+}
+
+// ── Create a new patient ─────────────────────────────────────────────────────
+export function useCreatePatient() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: {
+      name:    string;
+      age:     number;
+      gender:  'MALE' | 'FEMALE' | 'OTHER';
+      mobile?: string;
+      abha_id?: string;
+    }): Promise<Patient> => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const { data, error } = await supabase
+        .from('patients')
+        .insert({ ...input, doctor_id: user.id })
         .select()
         .single();
+
       if (error) throw error;
       return data as Patient;
     },
     onSuccess: () => {
-      // Bust all patient search caches so new patient appears
+      // Invalidate all patient queries so search results refresh
       qc.invalidateQueries({ queryKey: patientKeys.all });
     },
   });
-};
+}

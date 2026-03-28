@@ -1,64 +1,79 @@
-import { useEffect } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '../api/supabase';
-import { useSessionStore } from '../store/sessionStore';
+import type { FHIRBundle } from '../../shared/types/db';
+
+interface UseFHIRBundleResult {
+  bundle:    FHIRBundle | null;
+  isLoading: boolean;
+  error:     string | null;
+  refetch:   () => Promise<void>;
+}
 
 /**
- * useFHIRBundle
- *
- * Fetches and caches the FHIR bundle for the active session.
- * Usually populated via Realtime (fhir_ready event in useTranscriptStream),
- * but this hook acts as a fallback: if sessionId exists and fhirBundle is
- * missing, it polls the DB once to hydrate the store.
- *
- * Place this hook on the review screen so the FHIR tab auto-populates
- * even if the Realtime event was missed (e.g. app was backgrounded).
+ * Fetches and caches the FHIR bundle for a session.
+ * Also subscribes to the "fhir_ready" Realtime event to auto-load
+ * the bundle as soon as the Edge Function finishes generating it.
  */
-export const useFHIRBundle = (sessionId: string | null) => {
-  const { fhirBundle, setFhirBundle } = useSessionStore();
+export function useFHIRBundle(sessionId: string | null): UseFHIRBundleResult {
+  const [bundle,    setBundle]    = useState<FHIRBundle | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error,     setError]     = useState<string | null>(null);
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
+  const fetchBundle = useCallback(async () => {
+    if (!sessionId) return;
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const { data, error: dbErr } = await supabase
+        .from('fhir_bundles')
+        .select('*')
+        .eq('session_id', sessionId)
+        .maybeSingle();
+
+      if (dbErr) throw dbErr;
+      setBundle(data as FHIRBundle | null);
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to fetch FHIR bundle');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [sessionId]);
+
+  // Initial fetch
   useEffect(() => {
-    if (!sessionId || fhirBundle) return;
+    if (sessionId) {
+      fetchBundle();
+    } else {
+      setBundle(null);
+    }
+  }, [sessionId, fetchBundle]);
 
-    let cancelled = false;
+  // Realtime subscription for fhir_ready event
+  useEffect(() => {
+    if (!sessionId) return;
 
-    const fetchBundle = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('fhir_bundles')
-          .select('*')
-          .eq('session_id', sessionId)
-          .maybeSingle();
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+    }
 
-        if (!cancelled && !error && data) {
-          setFhirBundle(data);
-        }
-      } catch (e) {
-        console.error('useFHIRBundle fetch error:', e);
-      }
-    };
-
-    fetchBundle();
-
-    // Also subscribe to the fhir_ready event in case it fires later
     const channel = supabase
-      .channel(`fhir-fallback:${sessionId}`)
-      .on('broadcast', { event: 'fhir_ready' }, async ({ payload }) => {
-        if (cancelled) return;
-        const { bundle_id } = payload as { bundle_id: string };
-        const { data } = await supabase
-          .from('fhir_bundles')
-          .select('*')
-          .eq('id', bundle_id)
-          .single();
-        if (data && !cancelled) setFhirBundle(data);
+      .channel(`fhir:${sessionId}`)
+      .on('broadcast', { event: 'fhir_ready' }, () => {
+        // Bundle is now in DB — fetch it
+        fetchBundle();
       })
       .subscribe();
 
-    return () => {
-      cancelled = true;
-      supabase.removeChannel(channel);
-    };
-  }, [sessionId]);
+    channelRef.current = channel;
 
-  return { fhirBundle };
-};
+    return () => {
+      supabase.removeChannel(channel);
+      channelRef.current = null;
+    };
+  }, [sessionId, fetchBundle]);
+
+  return { bundle, isLoading, error, refetch: fetchBundle };
+}

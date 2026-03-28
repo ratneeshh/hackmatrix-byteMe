@@ -1,65 +1,60 @@
 import { create } from 'zustand';
-import { TranscriptChunk, SOAPNote, FHIRBundle, SessionStatus } from '../../shared/types/db';
+import type { TranscriptChunk, SOAPNote, SessionStatus } from '../../shared/types/db';
 
-type SessionState = {
+interface SessionState {
   // Active session
-  sessionId: string | null;
-  patientId: string | null;
-  status: SessionStatus | 'IDLE';
+  sessionId:        string | null;
+  patientId:        string | null;
+  status:           SessionStatus | null;
+  isRecording:      boolean;
 
-  // Recording
-  isWakeWordActive: boolean;
-  isRecording: boolean;
-  chunkIndex: number;
-
-  // Transcript
+  // Live transcript chunks streamed via Realtime
   transcriptChunks: TranscriptChunk[];
 
-  // Results
-  soapNote: SOAPNote | null;
-  fhirBundle: FHIRBundle | null;
-  pdfUrl: string | null;
+  // SOAP note populated after analysis
+  soapNote:         SOAPNote | null;
 
   // Actions
-  setSessionId: (id: string) => void;
-  setPatientId: (id: string) => void;
-  setStatus: (status: SessionStatus | 'IDLE') => void;
-  setWakeWordActive: (val: boolean) => void;
-  setRecording: (val: boolean) => void;
-  incrementChunk: () => void;
-  appendTranscript: (chunk: TranscriptChunk) => void;
-  setSoapNote: (note: SOAPNote) => void;
-  setFhirBundle: (bundle: FHIRBundle) => void;
-  setPdfUrl: (url: string) => void;
-  resetSession: () => void;
-};
+  setSessionId:     (id: string | null) => void;
+  setPatientId:     (id: string | null) => void;
+  setStatus:        (status: SessionStatus | null) => void;
+  setRecording:     (isRecording: boolean) => void;
+  appendChunk:      (chunk: TranscriptChunk) => void;
+  setSoapNote:      (note: SOAPNote | null) => void;
+  resetSession:     () => void;
+}
 
 const initialState = {
-  sessionId: null,
-  patientId: null,
-  status: 'IDLE' as const,
-  isWakeWordActive: false,
-  isRecording: false,
-  chunkIndex: 0,
+  sessionId:        null,
+  patientId:        null,
+  status:           null,
+  isRecording:      false,
   transcriptChunks: [],
-  soapNote: null,
-  fhirBundle: null,
-  pdfUrl: null,
+  soapNote:         null,
 };
 
 export const useSessionStore = create<SessionState>((set) => ({
   ...initialState,
 
-  setSessionId: (id) => set({ sessionId: id }),
-  setPatientId: (id) => set({ patientId: id }),
-  setStatus: (status) => set({ status }),
-  setWakeWordActive: (val) => set({ isWakeWordActive: val }),
-  setRecording: (val) => set({ isRecording: val }),
-  incrementChunk: () => set((s) => ({ chunkIndex: s.chunkIndex + 1 })),
-  appendTranscript: (chunk) =>
-    set((s) => ({ transcriptChunks: [...s.transcriptChunks, chunk] })),
-  setSoapNote: (note) => set({ soapNote: note }),
-  setFhirBundle: (bundle) => set({ fhirBundle: bundle }),
-  setPdfUrl: (url) => set({ pdfUrl: url }),
+  setSessionId:  (id)          => set({ sessionId: id }),
+  setPatientId:  (id)          => set({ patientId: id }),
+  setStatus:     (status)      => set({ status }),
+  setRecording:  (isRecording) => set({ isRecording }),
+  setSoapNote:   (soapNote)    => set({ soapNote }),
+
+  appendChunk: (chunk) =>
+    set(state => {
+      // Deduplicate by chunk_index in case Realtime re-delivers
+      const exists = state.transcriptChunks.some(
+        c => c.chunk_index === chunk.chunk_index && c.session_id === chunk.session_id,
+      );
+      if (exists) return state;
+      return {
+        transcriptChunks: [...state.transcriptChunks, chunk].sort(
+          (a, b) => a.chunk_index - b.chunk_index,
+        ),
+      };
+    }),
+
   resetSession: () => set(initialState),
 }));

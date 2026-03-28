@@ -1,140 +1,130 @@
-import { useCallback, useRef } from 'react';
-import { Alert } from 'react-native';
-import { useRouter } from 'expo-router';
-import { supabase } from '../api/supabase';
+import { useCallback } from 'react';
+import { callFunction } from '../api/supabase';
 import { useSessionStore } from '../store/sessionStore';
-import { useAuthStore } from '../store/authStore';
+import type {
+  StartSessionRequest,
+  StartSessionResponse,
+  EndSessionResponse,
+  GetSessionResponse,
+  PatchSOAPRequest,
+  FinaliseResponse,
+} from '../../shared/types/api';
 
-/**
- * useSession — master hook for session lifecycle.
- *
- * Responsibilities:
- *  - startSession(patientId): calls /sessions/start, sets sessionId in store
- *  - endSession():            calls /sessions/{id}/end, sets status to PROCESSING
- *  - finaliseSession(edits):  patches soap edits then calls /sessions/{id}/finalise
- *  - resetAndGoHome():        clears store and navigates home
- *
- * Does NOT own recording or transcript streaming — those live in
- * AmbientRecorder and useTranscriptStream respectively.
- */
-export const useSession = () => {
-  const router = useRouter();
-  const { doctor } = useAuthStore();
+export function useSession() {
   const {
     sessionId,
     setSessionId,
     setPatientId,
     setStatus,
     setRecording,
+    setSoapNote,
     resetSession,
   } = useSessionStore();
 
-  // Track in-flight requests to avoid duplicates
-  const endingRef = useRef(false);
-  const finalisingRef = useRef(false);
+  // ── Start a new session ──────────────────────────────────────────────────
+  const startSession = useCallback(async (
+    patientId: string,
+    language = 'en-hi',
+  ): Promise<StartSessionResponse> => {
+    const res = await callFunction<StartSessionResponse>('sessions/start', {
+      patient_id: patientId,
+      language,
+    } satisfies StartSessionRequest);
 
-  // ─────────────────────────────────────────────────────────────
-  // startSession
-  // ─────────────────────────────────────────────────────────────
-  const startSession = useCallback(
-    async (patientId: string): Promise<string | null> => {
-      try {
-        resetSession();
-        setPatientId(patientId);
+    setSessionId(res.session_id);
+    setPatientId(patientId);
+    setStatus('RECORDING');
 
-        const language = doctor?.preferred_language ?? 'en-hi';
+    return res;
+  }, [setSessionId, setPatientId, setStatus]);
 
-        const { data, error } = await supabase.functions.invoke('sessions/start', {
-          body: { patient_id: patientId, language },
-        });
+  // ── Send an audio chunk ──────────────────────────────────────────────────
+  const sendChunk = useCallback(async (
+    audiob64: string,
+    chunkIndex: number,
+  ) => {
+    if (!sessionId) throw new Error('No active session');
 
-        if (error) throw error;
-        if (!data?.session_id) throw new Error('No session_id returned');
+    return callFunction(
+      `sessions/${sessionId}/chunk`,
+      { audio_b64: audiob64, chunk_index: chunkIndex },
+    );
+  }, [sessionId]);
 
-        setSessionId(data.session_id);
-        setStatus('RECORDING');
+  // ── End session (triggers analyse → SOAP → FHIR pipeline) ───────────────
+  const endSession = useCallback(async (): Promise<EndSessionResponse> => {
+    if (!sessionId) throw new Error('No active session');
 
-        return data.session_id as string;
-      } catch (e: any) {
-        console.error('startSession error:', e);
-        Alert.alert('Error', e.message ?? 'Failed to start session');
-        return null;
-      }
-    },
-    [doctor]
-  );
+    const res = await callFunction<EndSessionResponse>(
+      `sessions/${sessionId}/end`,
+      {},
+    );
 
-  // ─────────────────────────────────────────────────────────────
-  // endSession  (called AFTER AmbientRecorder.stopChunkLoop)
-  //
-  // NOTE: AmbientRecorder.stopChunkLoop() already POSTs /sessions/{id}/end
-  // internally (it needs to flush the final audio chunk first).
-  // This function must NOT call /end again — it only updates local state.
-  // ─────────────────────────────────────────────────────────────
-  const endSession = useCallback(async () => {
-    if (endingRef.current) return;
-    endingRef.current = true;
-    try {
-      setRecording(false);
-      setStatus('PROCESSING');
-      // PROCESSING → REVIEW transition happens via Realtime analysis_complete event
-      // (handled in useTranscriptStream → navigates to review screen automatically)
-    } finally {
-      endingRef.current = false;
+    setRecording(false);
+    setStatus('PROCESSING');
+
+    return res;
+  }, [sessionId, setRecording, setStatus]);
+
+  // ── Fetch full session data (session + transcripts + SOAP + FHIR) ────────
+  const getSession = useCallback(async (id?: string): Promise<GetSessionResponse> => {
+    const sid = id ?? sessionId;
+    if (!sid) throw new Error('No session ID');
+
+    const res = await callFunction<GetSessionResponse>(
+      `sessions/${sid}`,
+      undefined,
+      'GET',
+    );
+
+    if (res.soap_note) {
+      setSoapNote(res.soap_note);
+      setStatus(res.session.status);
     }
-  }, []);
 
-  // ─────────────────────────────────────────────────────────────
-  // finaliseSession  (called from review screen)
-  // ─────────────────────────────────────────────────────────────
-  const finaliseSession = useCallback(
-    async (doctorEdits: Record<string, any> = {}): Promise<string | null> => {
-      if (!sessionId || finalisingRef.current) return null;
-      finalisingRef.current = true;
+    return res;
+  }, [sessionId, setSoapNote, setStatus]);
 
-      try {
-        // 1. Persist doctor edits to soap_notes
-        if (Object.keys(doctorEdits).length > 0) {
-          const { error: patchError } = await supabase.functions.invoke(
-            `sessions/${sessionId}/soap`,
-            { body: { doctor_edits: doctorEdits } }
-          );
-          if (patchError) throw patchError;
-        }
+  // ── Save doctor edits to SOAP note ───────────────────────────────────────
+  const patchSoap = useCallback(async (
+    edits: Record<string, unknown>,
+  ) => {
+    if (!sessionId) throw new Error('No active session');
 
-        // 2. Finalise: triggers prescription PDF generation
-        const { data, error } = await supabase.functions.invoke(
-          `sessions/${sessionId}/finalise`,
-          { body: {} }
-        );
-        if (error) throw error;
+    return callFunction(
+      `sessions/${sessionId}/soap`,
+      { doctor_edits: edits } satisfies PatchSOAPRequest,
+      'PATCH',
+    );
+  }, [sessionId]);
 
-        setStatus('COMPLETE');
-        return data?.pdf_url ?? null;
-      } catch (e: any) {
-        console.error('finaliseSession error:', e);
-        Alert.alert('Error', e.message ?? 'Failed to finalise session');
-        return null;
-      } finally {
-        finalisingRef.current = false;
-      }
-    },
-    [sessionId]
-  );
+  // ── Finalise session → generate PDF ─────────────────────────────────────
+  const finaliseSession = useCallback(async (): Promise<FinaliseResponse> => {
+    if (!sessionId) throw new Error('No active session');
 
-  // ─────────────────────────────────────────────────────────────
-  // resetAndGoHome
-  // ─────────────────────────────────────────────────────────────
-  const resetAndGoHome = useCallback(() => {
+    const res = await callFunction<FinaliseResponse>(
+      `sessions/${sessionId}/finalise`,
+      {},
+    );
+
+    setStatus('COMPLETE');
+
+    return res;
+  }, [sessionId, setStatus]);
+
+  // ── Reset local session state (call after navigating away) ───────────────
+  const clearSession = useCallback(() => {
     resetSession();
-    router.replace('/(app)');
-  }, []);
+  }, [resetSession]);
 
   return {
     sessionId,
     startSession,
+    sendChunk,
     endSession,
+    getSession,
+    patchSoap,
     finaliseSession,
-    resetAndGoHome,
+    clearSession,
   };
-};
+}
