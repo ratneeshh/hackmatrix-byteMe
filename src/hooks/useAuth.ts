@@ -49,7 +49,7 @@ export const useAuth = () => {
         // Returning doctor — go to PIN setup confirmation
         setDoctor(doctor);
         setAuthenticated(true);
-        router.replace('/(app)/');
+        router.replace('/(app)');
       } else {
         // New doctor — needs to set PIN + profile
         router.replace('/(auth)/verify');
@@ -97,7 +97,7 @@ export const useAuth = () => {
 
       setDoctor(doctor);
       setAuthenticated(true);
-      router.replace('/(app)/');
+      router.replace('/(app)');
       return { success: true };
     } catch (e: any) {
       setError(e.message || 'Failed to set PIN');
@@ -127,7 +127,7 @@ export const useAuth = () => {
 
       setDoctor(doctor);
       setAuthenticated(true);
-      router.replace('/(app)/');
+      router.replace('/(app)');
       return { success: true };
     } catch (e: any) {
       setError(e.message || 'Invalid PIN');
