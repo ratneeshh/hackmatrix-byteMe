@@ -65,30 +65,24 @@ export const useSession = () => {
   );
 
   // ─────────────────────────────────────────────────────────────
-  // endSession  (called after recording stops)
+  // endSession  (called AFTER AmbientRecorder.stopChunkLoop)
+  //
+  // NOTE: AmbientRecorder.stopChunkLoop() already POSTs /sessions/{id}/end
+  // internally (it needs to flush the final audio chunk first).
+  // This function must NOT call /end again — it only updates local state.
   // ─────────────────────────────────────────────────────────────
   const endSession = useCallback(async () => {
-    if (!sessionId || endingRef.current) return;
+    if (endingRef.current) return;
     endingRef.current = true;
-
     try {
       setRecording(false);
       setStatus('PROCESSING');
-
-      const { error } = await supabase.functions.invoke(`sessions/${sessionId}/end`, {
-        body: {},
-      });
-
-      if (error) throw error;
-      // Status will transition to REVIEW via Realtime analysis_complete event
-    } catch (e: any) {
-      console.error('endSession error:', e);
-      setStatus('FAILED');
-      Alert.alert('Error', e.message ?? 'Failed to end session');
+      // PROCESSING → REVIEW transition happens via Realtime analysis_complete event
+      // (handled in useTranscriptStream → navigates to review screen automatically)
     } finally {
       endingRef.current = false;
     }
-  }, [sessionId]);
+  }, []);
 
   // ─────────────────────────────────────────────────────────────
   // finaliseSession  (called from review screen)

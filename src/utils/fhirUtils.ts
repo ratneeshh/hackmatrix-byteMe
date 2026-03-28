@@ -155,7 +155,7 @@ export function formatResource(resource: FHIRBundleEntry['resource']): string {
     case 'Condition':         return formatCondition(resource as FHIRCondition);
     case 'MedicationRequest': return formatMedication(resource as FHIRMedicationRequest);
     case 'CarePlan':          return formatCarePlan(resource as FHIRCarePlan);
-    default:                  return resource.resourceType ?? 'Resource';
+    default:                  return (resource as Record<string, unknown>).resourceType as string ?? 'Resource';
   }
 }
 
